@@ -14,6 +14,8 @@ Le graphique `conc.png` montre l'évolution du temps de réponse moyen par rappo
 
 ## 2. Analyse de la Complexité des Données (Fan-out)
 
+![Performance de Fanout](fanout.png)
+
 ### Observations
 Le graphique `fanout.png` mesure l'impact du nombre de "followees" (abonnements) sur le temps d'affichage de la timeline pour un groupe de 50 utilisateurs constants.
 
