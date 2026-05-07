@@ -1,166 +1,34 @@
-# Tiny Instagram (minimal) on Google App Engine
+# Rapport d'Analyse de Performance - TinyInsta
 
-This repository contains a tiny Instagram-like demo implemented with Flask and Google Cloud Datastore (Firestore in Datastore mode). It is a small, educational project that demonstrates posting, following, and reading a simple timeline.
+Ce projet vise à évaluer les capacités de montée en charge d'une application de type réseau social déployée sur Google Cloud Platform (GCP). Nous avons testé deux dimensions critiques : la **charge (concurrence)** et la **complexité (fan-out)**.
 
-This README describes how to run, seed and test the app, plus notes about GQL queries and common deployment troubleshooting.
+## 1. Analyse de la Scalabilité en Charge (Concurrence)
 
-## Prerequisites
-- Create a GCP Project:`https://console.cloud.google.com/`
-  - See the prof.
+### Observations
+Le graphique `conc.png` montre l'évolution du temps de réponse moyen par rapport au nombre d'utilisateurs simultanés (de 1 à 1000). 
 
-- Open a cloud shell 
-  - see the prof.
+### Interprétation
+*   **Scalabilité Horizontale :** Conformément au concept de "Meta-Computer" vu en cours, l'infrastructure a réagi de manière élastique. Le passage de 1 à plusieurs instances (`NB_INSTANCE`) montre que le **Control Plane** d'App Engine a correctement orchestré l'autoscaling.
+*   **Corrélation Latence/TPS :** Comme illustré dans les benchmarks du cours (exemple `insert_post.sql`), nous observons que si le débit (TPS) augmente avec le nombre de clients, la latence individuelle augmente également. C'est logique : malgré l'ajout d'instances CPU, la contention se déplace vers les ressources partagées (Shared Memory/Datastore). 
+*   **Verdict :** Le système **scale**. L'application ne sature pas et ne renvoie pas d'erreurs (FAILED=0), prouvant que l'architecture distribuée absorbe la charge.
 
-* Initialize or select your GCP project and create the App Engine application (if not already created):
+## 2. Analyse de la Complexité des Données (Fan-out)
 
-```sh
-gcloud init
-gcloud app create
-```
+### Observations
+Le graphique `fanout.png` mesure l'impact du nombre de "followees" (abonnements) sur le temps d'affichage de la timeline pour un groupe de 50 utilisateurs constants.
 
-- clone the prof github repository : 
-```
-git clone https://github.com/momo54/massive-gcp
-cd massive-gcp
-```
+### Interprétation MIAGE
+*   **Le coût de l'Ingress/Read :** Le temps de réponse augmente de façon quasi-linéaire avec le nombre de sources. C'est le problème classique du **Fan-out à la lecture**. Pour construire une timeline, le système doit effectuer un "on-demand merge" (jointure ou agrégation au moment de la requête).
+*   **Limites du NoSQL/Firestore :** Comme vu dans le cours, chaque abonné supplémentaire augmente le volume de données à scanner. Si l'on projette ces résultats sur les volumes mentionnés en cours (0.8 à 3.6 PB/jour pour des services comme Instagram), on comprend que cette stratégie de lecture directe ne peut pas tenir à très grande échelle.
+*   **Verdict :** Ici, le système **ne scale pas de manière optimale**. La latence devient trop élevée pour une expérience utilisateur fluide quand la complexité des relations augmente.
 
-* Install dependencies
-```sh
-pip install -r requirements.txt
-```
+## 3. Conclusion Générale : Est-ce que ça "scale" ?
 
-* Deploy the app:
+Le bilan est nuancé, ce qui est typique des systèmes de gestion de données massives :
 
-```sh
-gcloud app deploy
-```
+1.  **OUI pour la couche Application :** Grâce à l'abstraction de l'OS (scheduling, autoscaling de GCP), nous pouvons supporter des milliers d'utilisateurs en ajoutant des processus.
+2.  **NON pour la stratégie de données actuelle :** Le modèle actuel repose sur une cohérence forte ou un calcul à la demande. Pour atteindre une scalabilité "Massive Data", il faudrait implémenter les concepts vus en fin de cours :
+    *   **Eventual Consistency :** Accepter que la timeline ne soit pas mise à jour à la millisecondes près (comme l'exemple du compteur de "likes" asynchrone via Pub/Sub).
+    *   **Pre-computation :** Utiliser des files de messages pour distribuer les nouveaux posts dans les "inboxes" des abonnés au moment de l'écriture (Write-heavy) plutôt que de tout calculer à la lecture.
 
-* [OPTIONAL] Index does not matter:
-
-```sh
-gcloud app deploy index.yaml
-# or
-gcloud datastore indexes create index.yaml
-```
-
-* open the URL address of the you application, create account, post, follow. Does it Works?? If something is wrong where to find the error ?? 
-  * See the prof
-
-
-* How many servers are working for this app?? How much are you paying for running this app ? What is the cloud model for this app (Iaas, Paas, Saas). What is the Platform in PaaS ??
-
-* See the impact in the datastore: do you see your data ?
-  * See the prof
-
-* How much are you paying for hosting these data in this store ?? 
-* What is the consistency of this store ?
-* What is the sharding strategy of this store ? How to be sure of that ? 
-* What queries can you write with store (expressivity)
-
-## HTTP Endpoints
-
-- `/` — HTML UI for simple interactions
-- `POST /login` — login with a username (no password)
-- `POST /post` — create a new post (form)
-- `POST /follow` — follow another user (form)
-- `GET /api/timeline?user=<username>&limit=<n>` — JSON timeline for a user (default limit 20)
-- `POST /admin/seed` — server-side seed (requires `SEED_TOKEN` via header `X-Seed-Token` or `token` param)
-
-Example server-side seed call:
-
-```sh
-curl -X POST \
-  -H "X-Seed-Token: change-me-seed-token" \
-  "https://<YOUR_APP>.appspot.com/admin/seed?users=8&posts=100&follows_min=1&follows_max=4&prefix=load"
-```
-
-## Access the backend from the CLI
-
-The JSON endpoint `GET /api/timeline?user=<username>&limit=20` is suitable for basic load experiments.
-
-- Run locally against the dev server:
-
-```sh
-ab -n 200 -c 20 "http://127.0.0.1:8080/api/timeline?user=demo1&limit=20"
-```
-
-- Run against the deployed app (no cookie):
-
-```sh
-ab -n 500 -c 50 "https://<YOUR_APP>.appspot.com/api/timeline?user=demo1&limit=20"
-```
-
-- Optional: include a session cookie if you want to test authenticated flows (get `session` cookie from your browser devtools):
-
-```sh
-AB_COOKIE="session=<VALUE>"
-ab -n 500 -c 50 -H "Cookie: $AB_COOKIE" "https://<YOUR_APP>.appspot.com/api/timeline?limit=20"
-```
-
-Interpreting common metrics:
-- `Requests per second` — throughput
-- `Time per request` — latency
-- `Failed requests` — should remain near 0 for a healthy run
-
-## GQL & Datastore notes
-
-The timeline query used by the app is roughly:
-
-```sql
-SELECT * FROM Post WHERE author IN @authors ORDER BY created DESC
-```
-
-Notes:
-- `IN` queries are conceptually implemented as a union of per-author scans followed by a k-way merge ordered by `created DESC`.
-- The repository includes `index.yaml` with a composite index (author + created desc), which is required for efficient execution of the timeline query.
-- Writes use the Datastore entity API; GQL is used for convenient reads only.
-
-Limitations and trade-offs:
-- `IN` with many values increases work and latency because it becomes multiple queries merged server-side.
-- Global queries are eventually consistent; only key lookups and ancestor queries are strongly consistent. See `NOTES.md` for more detail.
-
-## Troubleshooting: Cloud Build / staging bucket error
-
-If you encounter an error like:
-
-```
-Failed to create cloud build: ... invalid bucket "staging.<PROJECT>.appspot.com"; service account ... does not have access
-```
-
-Check the following:
-
-1. Required services are enabled:
-
-```sh
-gcloud services enable appengine.googleapis.com cloudbuild.googleapis.com iam.googleapis.com storage.googleapis.com
-```
-
-2. Ensure the App Engine service account has sufficient permissions on the staging bucket. For example, grant storage admin at project level (adjust to least privilege required):
-
-```sh
-PROJECT_ID="<YOUR_PROJECT>"
-gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-  --member="serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com" \
-  --role="roles/storage.admin"
-```
-
-3. If the staging bucket is missing, create it and grant the service account object admin on the bucket:
-
-```sh
-gsutil mb -p "$PROJECT_ID" -l europe-west1 "gs://staging.${PROJECT_ID}.appspot.com"
-gsutil iam ch serviceAccount:${PROJECT_ID}@appspot.gserviceaccount.com:objectAdmin "gs://staging.${PROJECT_ID}.appspot.com"
-```
-
-Index deployment (if GCP prompts for missing indexes):
-
-```sh
-gcloud datastore indexes create index.yaml || gcloud app deploy index.yaml
-```
-
-## Notes on consistency, partitioning and CAP
-See `NOTES.md` for a concise explanation of Datastore's partitioning (range partitioning with dynamic splits), replication, and its consistency model (generally AP for global queries; strong consistency for key lookups and ancestor queries).
-
-## License
-MIT
-
-```
+En résumé, l'infrastructure est scalable, mais le design algorithmique du Fan-out atteint ses limites, validant ainsi les compromis (Trade-offs) étudiés en cours.
