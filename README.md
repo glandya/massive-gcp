@@ -19,7 +19,7 @@ Le graphique `conc.png` montre l'évolution du temps de réponse moyen par rappo
 ### Observations
 Le graphique `fanout.png` mesure l'impact du nombre de "followees" (abonnements) sur le temps d'affichage de la timeline pour un groupe de 50 utilisateurs constants.
 
-### Interprétation MIAGE
+### Interprétation
 *   **Le coût de l'Ingress/Read :** Le temps de réponse augmente de façon quasi-linéaire avec le nombre de sources. C'est le problème classique du **Fan-out à la lecture**. Pour construire une timeline, le système doit effectuer un "on-demand merge" (jointure ou agrégation au moment de la requête).
 *   **Limites du NoSQL/Firestore :** Comme vu dans le cours, chaque abonné supplémentaire augmente le volume de données à scanner. Si l'on projette ces résultats sur les volumes mentionnés en cours (0.8 à 3.6 PB/jour pour des services comme Instagram), on comprend que cette stratégie de lecture directe ne peut pas tenir à très grande échelle.
 *   **Verdict :** Ici, le système **ne scale pas de manière optimale**. La latence devient trop élevée pour une expérience utilisateur fluide quand la complexité des relations augmente.
