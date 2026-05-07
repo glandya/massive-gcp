@@ -3,7 +3,7 @@
 Ce projet vise à évaluer les capacités de montée en charge d'une application de type réseau social déployée sur Google Cloud Platform (GCP). Nous avons testé deux dimensions critiques : la **charge (concurrence)** et la **complexité (fan-out)**.
 
 ## 1. Analyse de la Scalabilité en Charge (Concurrence)
-
+![Performance de Concurrence](conc.png)
 ### Observations
 Le graphique `conc.png` montre l'évolution du temps de réponse moyen par rapport au nombre d'utilisateurs simultanés (de 1 à 1000). 
 
